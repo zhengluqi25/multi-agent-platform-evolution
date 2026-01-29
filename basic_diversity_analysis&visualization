@@ -1,0 +1,140 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.interpolate import griddata
+
+def create_diversity_heatmap():
+    """Create a continuous heatmap of strategy diversity"""
+    
+    # Read data
+    try:
+        df = pd.read_csv('market_evolution_results.csv')
+    except:
+        print("Error: Cannot find market_evolution_results.csv")
+        return
+    
+    print(f"Data loaded successfully, total {len(df)} records")
+    
+    # Calculate strategy diversity
+    def count_unique_strategies(group):
+        strategies = set()
+        for _, row in group.iterrows():
+            strategy = (
+                row['price'] // 50,  # Price grouping
+                row['craftsmanship'],
+                row['design'],
+                row['eco_friendly']
+            )
+            strategies.add(strategy)
+        return len(strategies) / len(group)  # Normalized diversity (0-1)
+    
+    # Calculate average diversity for each parameter combination
+    diversity_data = []
+    unique_mu = sorted(df['mu'].unique())
+    unique_hgt = sorted(df['hgt'].unique())
+    
+    for mu in unique_mu:
+        for hgt in unique_hgt:
+            # Get data for final generation
+            current_data = df[
+                (df['mu'] == mu) &
+                (df['hgt'] == hgt) &
+                (df['generation'] == df['generation'].max())
+            ]
+            
+            if len(current_data) > 0:
+                # Calculate average diversity across replicates
+                diversity_values = []
+                for replicate in [0, 1]:
+                    rep_data = current_data[current_data['replicate'] == replicate]
+                    if len(rep_data) > 0:
+                        diversity = count_unique_strategies(rep_data)
+                        diversity_values.append(diversity)
+                
+                if diversity_values:
+                    avg_diversity = np.mean(diversity_values)
+                    diversity_data.append({
+                        'mu': mu,
+                        'hgt': hgt,
+                        'diversity': avg_diversity
+                    })
+    
+    diversity_df = pd.DataFrame(diversity_data)
+    
+    # Create continuous grid for heatmap
+    x = diversity_df['mu'].values
+    y = diversity_df['hgt'].values
+    z = diversity_df['diversity'].values
+    
+    # Create fine grid for smooth interpolation
+    xi = np.linspace(x.min(), x.max(), 100)
+    yi = np.linspace(y.min(), y.max(), 100)
+    xi, yi = np.meshgrid(xi, yi)
+    
+    # Interpolate diversity values onto the fine grid
+    zi = griddata((x, y), z, (xi, yi), method='cubic')
+    
+    # Create heatmap
+    fig, ax = plt.subplots(figsize=(12, 9))
+    
+    # Create continuous heatmap
+    im = ax.contourf(xi, yi, zi, levels=50, cmap='rainbow', alpha=0.8)
+    
+    # Add contour lines
+    contour = ax.contour(xi, yi, zi, levels=10, colors='black', alpha=0.5, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=8, fmt='%.2f')
+    
+    # Add original data points
+    scatter = ax.scatter(x, y, c=z, cmap='rainbow', s=80, edgecolors='black', linewidth=1)
+    
+    # Set labels and title
+    ax.set_xlabel('Mutation Rate (μ)', fontsize=14)
+    ax.set_ylabel('Imitation Rate (ι)', fontsize=14)
+    ax.set_title('Strategy Diversity Heatmap\n(Continuous Interpolation)', 
+                fontsize=16, fontweight='bold', pad=20)
+    
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax, shrink=0.8)
+    cbar.set_label('Strategy Diversity\n(Unique Strategies / Total Brands)', 
+                  rotation=270, labelpad=20, fontsize=8)
+    
+    # Set grid
+    ax.grid(True, alpha=0.3)
+    
+    # Set axis limits with some padding
+    ax.set_xlim(x.min() - 0.05, x.max() + 0.05)
+    ax.set_ylim(y.min() - 0.05, y.max() + 0.05)
+    
+    # Add statistics text box
+    stats_text = (
+        f"Parameter Range:\n"
+        f"μ: [{x.min():.1f}, {x.max():.1f}]\n"
+        f"ι: [{y.min():.1f}, {y.max():.1f}]\n"
+        f"Diversity: [{z.min():.3f}, {z.max():.3f}]\n"
+        f"Avg Diversity: {z.mean():.3f}"
+    )
+    
+    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
+            verticalalignment='top', fontsize=10,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+    
+    plt.tight_layout()
+    plt.savefig('strategy_diversity_continuous_heatmap.svg', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print("Continuous strategy diversity heatmap saved as: strategy_diversity_continuous_heatmap.svg")
+    
+    # Print diversity statistics
+    print(f"\nStrategy Diversity Statistics:")
+    print(f"Average diversity: {z.mean():.3f}")
+    print(f"Min diversity: {z.min():.3f}")
+    print(f"Max diversity: {z.max():.3f}")
+    print(f"Standard deviation: {z.std():.3f}")
+    
+    return diversity_df
+
+# Run plot generation
+if __name__ == "__main__":
+    print("Creating continuous strategy diversity heatmap...")
+    diversity_df = create_diversity_heatmap()
+    print("\nHeatmap generation completed!")
