@@ -1,0 +1,267 @@
+import random
+import pandas as pd
+import numpy as np
+
+class SimpleMarketEvolution:
+    def __init__(self, mu=0.1, hgt=0.1, num_brands=1000, market_size=800, gamma=0.5):
+        self.mu = mu  # 突变率
+        self.hgt = hgt  # 水平基因转移率
+        self.num_brands = num_brands  # 品牌总数
+        self.market_size = market_size  # 市场规模
+        self.original_gamma = gamma  # 保存原始gamma值
+        self.gamma = gamma  # 当前gamma值
+        self.generation = 0
+        self.target_price = None  # 第15代的目标价格
+        self.converged = False  # 是否达到收敛
+        
+        # 初始化品牌
+        self.brands = [self.create_random_brand(i) for i in range(num_brands)]
+
+    def create_random_brand(self, brand_id):
+        """创建随机品牌"""
+        brand = {
+            'id': brand_id,
+            'price': random.randint(1, 1000),
+            'craftsmanship': random.randint(1, 10),
+            'design': random.randint(1, 10),
+            'eco_friendly': random.randint(1, 10),
+        }
+        brand['fitness'] = self.calculate_fitness(brand)
+        return brand
+
+    def calculate_comprehensive_quality(self, brand):
+        """计算综合质量"""
+        return brand['craftsmanship'] * brand['design'] * brand['eco_friendly']
+
+    def calculate_fitness(self, brand):
+        """计算适应度"""
+        quality = self.calculate_comprehensive_quality(brand)
+        price = brand['price']
+        value_match = 1 / (1 + abs(price - quality))
+        return value_match
+
+    def get_brand_strategy(self, brand):
+        """获取品牌策略标识"""
+        return (
+            brand['price'] // 100,  # 价格分组
+            brand['craftsmanship'] // 2,  # 工艺分组
+            brand['design'] // 2,  # 设计分组
+            brand['eco_friendly'] // 2  # 环保分组
+        )
+
+    def mutate_attribute(self, brand):
+        """基因突变"""
+        attribute = random.choice(['price', 'craftsmanship', 'design', 'eco_friendly'])
+        if attribute == 'price':
+            brand[attribute] = max(1, min(1000, brand[attribute] + random.randint(-200, 200)))
+        else:
+            brand[attribute] = max(1, min(10, brand[attribute] + random.randint(-2, 2)))
+
+    def horizontal_gene_transfer(self, brand, surviving_brands):
+        """水平基因转移"""
+        if surviving_brands:
+            donor_brand = random.choice(surviving_brands)
+            attribute = random.choice(['price', 'craftsmanship', 'design', 'eco_friendly'])
+            brand[attribute] = donor_brand[attribute]
+
+    def create_new_brand(self, surviving_brands):
+        """创建新品牌，基于价格最接近的存活品牌"""
+        # 根据价格分布概率选择新品牌价格
+        candidate_prices = list(range(1, 1001))
+        market_weights = [(1 / price) ** self.gamma for price in candidate_prices]
+        new_price = random.choices(candidate_prices, weights=market_weights)[0]
+        
+        # 找到价格最接近的存活品牌，复制其策略
+        if surviving_brands:
+            closest_brand = min(surviving_brands, key=lambda b: abs(b['price'] - new_price))
+            craftsmanship = closest_brand['craftsmanship']
+            design = closest_brand['design']
+            eco_friendly = closest_brand['eco_friendly']
+        else:
+            craftsmanship = random.randint(1, 10)
+            design = random.randint(1, 10)
+            eco_friendly = random.randint(1, 10)
+        
+        brand = {
+            'id': -1,
+            'price': new_price,
+            'craftsmanship': craftsmanship,
+            'design': design,
+            'eco_friendly': eco_friendly,
+        }
+        brand['fitness'] = self.calculate_fitness(brand)
+        return brand
+
+    def count_unique_strategies(self):
+        """计算独特策略数量"""
+        strategies = set()
+        for brand in self.brands:
+            strategy = self.get_brand_strategy(brand)
+            strategies.add(strategy)
+        return len(strategies)
+
+    def apply_temporary_gamma_shock(self):
+        """应用临时gamma冲击"""
+        # 第15-20代：增加gamma值
+        if 15 <= self.generation <= 20:
+            if self.gamma == self.original_gamma:  # 只在第一次进入时应用
+                self.gamma = self.original_gamma + 0.5
+                print(f"*** 第{self.generation}代: 临时增加gamma值 {self.original_gamma} → {self.gamma} ***")
+        
+        # 第21代：恢复原始gamma值
+        elif self.generation == 21:
+            if self.gamma != self.original_gamma:  # 只在需要恢复时应用
+                self.gamma = self.original_gamma
+                print(f"*** 第{self.generation}代: 恢复原始gamma值 {self.original_gamma + 0.5} → {self.original_gamma} ***")
+
+    def check_convergence(self, current_price):
+        """检查是否达到收敛条件"""
+        if self.generation < 15:
+            return False
+            
+        # 在第15代记录目标价格
+        if self.generation == 15:
+            self.target_price = current_price
+            print(f"*** 记录目标价格: {self.target_price:.1f} ***")
+            return False
+        
+        # 从第21代开始检查收敛（冲击结束后）
+        if self.generation >= 21 and self.target_price is not None:
+            price_diff = abs(current_price - self.target_price)
+            if price_diff <= 1.0:
+                self.converged = True
+                print(f"*** 第{self.generation}代: 达到收敛条件! 当前价格{current_price:.1f}, 目标价格{self.target_price:.1f}, 差值{price_diff:.2f} ***")
+                return True
+        
+        return False
+
+    def evolve_generation(self):
+        """进化一代"""
+        # 应用临时gamma冲击
+        self.apply_temporary_gamma_shock()
+        
+        # 计算所有品牌的适应度
+        for brand in self.brands:
+            brand['fitness'] = self.calculate_fitness(brand)
+        
+        # 按适应度排序，保留前market_size个品牌
+        sorted_brands = sorted(self.brands, key=lambda x: x['fitness'], reverse=True)
+        surviving_brands = sorted_brands[:self.market_size]
+        
+        # 存活品牌进行基因操作
+        new_brands = []
+        for i, brand in enumerate(surviving_brands):
+            new_brand = brand.copy()
+            # 基因突变
+            if random.random() < self.mu:
+                self.mutate_attribute(new_brand)
+            # 水平基因转移
+            if random.random() < self.hgt:
+                self.horizontal_gene_transfer(new_brand, surviving_brands)
+            new_brand['fitness'] = self.calculate_fitness(new_brand)
+            new_brand['id'] = i
+            new_brands.append(new_brand)
+        
+        # 补充新品牌至总数1000
+        while len(new_brands) < self.num_brands:
+            new_brand = self.create_new_brand(surviving_brands)
+            new_brand['id'] = len(new_brands)
+            new_brands.append(new_brand)
+        
+        self.brands = new_brands
+        self.generation += 1
+
+    def get_stats(self):
+        """获取统计信息"""
+        prices = [b['price'] for b in self.brands]
+        qualities = [self.calculate_comprehensive_quality(b) for b in self.brands]
+        unique_strategies = self.count_unique_strategies()
+        
+        return {
+            'generation': self.generation,
+            'avg_price': np.mean(prices),
+            'avg_quality': np.mean(qualities),
+            'unique_strategies': unique_strategies,
+            'gamma': self.gamma,  # 添加gamma值到统计信息
+            'converged': self.converged  # 添加收敛状态
+        }
+
+    def run_simulation(self, max_generations=1000):
+        """运行模拟"""
+        history = []
+        print(f"参数: μ={self.mu}, ι={self.hgt}, 初始γ={self.original_gamma}")
+        print("代次 | 平均价格 | 平均品质 | 独特策略 | Gamma | 状态")
+        print("-" * 70)
+        
+        # 初始状态
+        stats = self.get_stats()
+        history.extend([{**brand.copy(), **stats} for brand in self.brands])
+        print(f"{self.generation:3d} | {stats['avg_price']:8.1f} | "
+              f"{stats['avg_quality']:8.1f} | {stats['unique_strategies']:8d} | "
+              f"γ={stats['gamma']:.1f} | 初始")
+        
+        # 进化循环
+        while self.generation < max_generations and not self.converged:
+            self.evolve_generation()
+            
+            stats = self.get_stats()
+            history.extend([{**brand.copy(), **stats} for brand in self.brands])
+            
+            # 检查收敛
+            self.check_convergence(stats['avg_price'])
+            
+            # 标记状态
+            status = ""
+            if 15 <= self.generation <= 20:
+                status = "冲击中*"
+            elif self.generation == 21:
+                status = "恢复期"
+            elif self.converged:
+                status = "已收敛!"
+            elif self.generation > 21:
+                price_diff = abs(stats['avg_price'] - self.target_price) if self.target_price else 0
+                status = f"恢复中({price_diff:.1f})"
+            
+            print(f"{self.generation:3d} | {stats['avg_price']:8.1f} | "
+                  f"{stats['avg_quality']:8.1f} | {stats['unique_strategies']:8d} | "
+                  f"γ={stats['gamma']:.1f} | {status}")
+        
+        # 输出最终结果
+        if self.converged:
+            print(f"\n*** 模拟在{self.generation}代收敛! ***")
+        else:
+            print(f"\n*** 模拟在{self.generation}代停止(达到最大代数) ***")
+        
+        return history
+
+def run_experiments():
+    """运行实验"""
+    all_results = []
+    mu_values = [0.2, 0.6, 1.0]
+    hgt_values = [0.2, 0.6, 1.0]
+    
+    for mu in mu_values:
+        for hgt in hgt_values:
+            print(f"\n=== 实验: μ={mu}, ι={hgt} ===")
+            for replicate in range(2):
+                print(f"重复实验 {replicate + 1}/2")
+                simulator = SimpleMarketEvolution(mu=mu, hgt=hgt, num_brands=1000, market_size=800)
+                history = simulator.run_simulation(max_generations=1000)
+                
+                for data in history:
+                    data['mu'] = mu
+                    data['hgt'] = hgt
+                    data['replicate'] = replicate
+                    data['target_price'] = simulator.target_price
+                    data['converged'] = simulator.converged
+                    data['final_generation'] = simulator.generation
+                
+                all_results.extend(history)
+    
+    df = pd.DataFrame(all_results)
+    df.to_csv('market_evolution_adaptive_convergence.csv', index=False)
+    print(f"\n完成! 生成 {len(df)} 条记录")
+    return df
+
+if __name__ == "__main__":
+    results = run_experiments()
