@@ -1,0 +1,184 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from mpl_toolkits.mplot3d import Axes3D
+import os
+from glob import glob
+from sklearn.neighbors import KernelDensity
+
+def create_3d_plots_for_all_combinations():
+    """Generate 3D plots for each (μ, ι) parameter combination"""
+    
+    # Read data
+    try:
+        df = pd.read_csv('market_evolution_results.csv')
+    except:
+        print("Error: Cannot find market_evolution_results.csv")
+        return 0
+    
+    print(f"Data loaded successfully, total {len(df)} records")
+    
+    # Get all unique (μ, ι) combinations
+    unique_combinations = df[['mu', 'hgt']].drop_duplicates()
+    print(f"Total {len(unique_combinations)} parameter combinations to generate plots for")
+    
+    # Create 3D plot for each combination
+    for idx, (mu, hgt) in unique_combinations.iterrows():
+        mu_val = mu
+        hgt_val = hgt
+        print(f"Generating plot {idx+1}/{len(unique_combinations)}: μ={mu_val}, ι={hgt_val}")
+        
+        # Filter data for current parameter combination
+        current_data = df[(df['mu'] == mu_val) & (df['hgt'] == hgt_val)]
+        
+        # Create 3D figure
+        fig = plt.figure(figsize=(14, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Prepare data - use scatter plot to show brand distribution
+        sample_data = current_data.sample(n=min(5000, len(current_data)), random_state=42)
+        
+        # Calculate comprehensive quality
+        if 'comprehensive_quality' not in sample_data.columns:
+            sample_data = sample_data.copy()
+            sample_data['comprehensive_quality'] = (
+                sample_data['craftsmanship'] *
+                sample_data['design'] *
+                sample_data['eco_friendly']
+            )
+        
+        # Calculate local density for each point
+        coords = sample_data[['price', 'comprehensive_quality']].values
+        
+        # Use kernel density estimation to calculate local density
+        kde = KernelDensity(bandwidth=50, kernel='gaussian')
+        kde.fit(coords)
+        log_density = kde.score_samples(coords)
+        density = (log_density - np.min(log_density)) / (np.max(log_density) - np.min(log_density))
+        
+        # Create 3D scatter plot, color represents local density
+        scatter = ax.scatter(
+            sample_data['price'],
+            sample_data['comprehensive_quality'],
+            sample_data['generation'],
+            c=density,
+            cmap='rainbow',
+            alpha=0.7,
+            s=20
+        )
+        
+        # Set axis labels
+        ax.set_xlabel('Price', fontsize=12, labelpad=10)
+        ax.set_ylabel('Comprehensive Quality Score\n(Craftsmanship × Design × Eco-friendly)', 
+                     fontsize=12, labelpad=10)
+        ax.set_zlabel('Time (Generation)', fontsize=12, labelpad=10)
+        
+        # Set title
+        title = f'Brand Strategy Evolution: μ={mu_val}, ι={hgt_val}'
+        plt.suptitle(title, fontsize=16, fontweight='bold', y=0.95)
+        
+        # Display parameter information below the chart
+        param_text = f'Mutation Rate μ = {mu_val} | Imitation Rate ι = {hgt_val} | Color represents local density (Red: High, Blue: Low)'
+        fig.text(0.5, 0.02, param_text, ha='center', fontsize=12,
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
+        
+        # Add color bar
+        cbar = plt.colorbar(scatter, ax=ax, pad=0.1)
+        cbar.set_label('Local Density', rotation=270, labelpad=15)
+        
+        # Set all axes to start from 0
+        ax.set_xlim(0, sample_data['price'].max())
+        ax.set_ylim(0, sample_data['comprehensive_quality'].max())
+        ax.set_zlim(0, sample_data['generation'].max())
+        
+        # Add diagonal reference line on price-quality plane
+        max_val = max(sample_data['price'].max(), sample_data['comprehensive_quality'].max())
+        diag_range = np.linspace(0, max_val, 10)
+        ax.plot(diag_range, diag_range, zs=0, color='black', linestyle='--', 
+                alpha=0.5, linewidth=1, label='Price=Quality')
+        
+        # Set viewing angle - from top diagonal perspective
+        ax.view_init(elev=30, azim=-45)  # Higher elevation for top-down view
+        
+        # Adjust layout
+        plt.tight_layout()
+        plt.subplots_adjust(bottom=0.15)
+        
+        # Save image
+        filename = f'3d_plot_mu_{mu_val}_hgt_{hgt_val}.png'
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close()  # Close figure to free memory
+        
+        print(f"  Saved: {filename}")
+    
+    return len(unique_combinations)
+
+def create_summary_grid():
+    """Create summary grid of all images"""
+    
+    # Get all generated image files
+    image_files = glob('3d_plot_mu_*_hgt_*.png')
+    
+    if not image_files:
+        print("No individual plots found to create summary grid")
+        return
+    
+    print(f"Found {len(image_files)} individual plots for summary grid")
+    
+    # Get all unique μ and ι values
+    mu_values = sorted(set([float(f.split('_')[3]) for f in image_files]))
+    hgt_values = sorted(set([float(f.split('_')[5].replace('.png', '')) for f in image_files]))
+    
+    n_mu = len(mu_values)
+    n_hgt = len(hgt_values)
+    
+    print(f"Creating {n_mu}×{n_hgt} summary grid")
+    
+    # Create summary figure
+    fig, axes = plt.subplots(n_mu, n_hgt, figsize=(n_hgt*4, n_mu*4))
+    
+    # Ensure axes is 2D array if only one row or column
+    if n_mu == 1:
+        axes = axes.reshape(1, -1)
+    if n_hgt == 1:
+        axes = axes.reshape(-1, 1)
+    
+    # Load and display each image
+    for i, mu in enumerate(mu_values):
+        for j, hgt in enumerate(hgt_values):
+            filename = f'3d_plot_mu_{mu}_hgt_{hgt}.png'
+            if os.path.exists(filename):
+                img = plt.imread(filename)
+                axes[i, j].imshow(img)
+                axes[i, j].axis('off')
+            else:
+                axes[i, j].text(0.5, 0.5, f'No data\nμ={mu}, ι={hgt}',
+                              ha='center', va='center', transform=axes[i, j].transAxes)
+                axes[i, j].axis('off')
+    
+    # Set main title
+    plt.suptitle('Brand Strategy Evolution - Parameter Space Overview\n(Top-Diagonal View Showing Convergence to Price=Quality Line)',
+                fontsize=16, fontweight='bold', y=0.98)
+    
+    # Adjust layout
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.93)
+    
+    # Save summary plot
+    plt.savefig('summary_grid_all_parameters.svg', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print("Summary grid saved as 'summary_grid_all_parameters.svg'")
+
+# Run plot generation
+if __name__ == "__main__":
+    print("Starting 3D plot generation...")
+    
+    # Generate standard 3D scatter plots
+    num_plots = create_3d_plots_for_all_combinations()
+    print("\nAll individual plots completed!")
+    
+    # Generate summary grid
+    print("\nCreating summary grid...")
+    create_summary_grid()
+    print("\nAll plot generation completed!")
